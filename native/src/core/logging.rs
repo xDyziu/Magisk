@@ -1,3 +1,4 @@
+use bytemuck::{bytes_of, bytes_of_mut, write_zeroes, Pod, Zeroable};
 use std::cmp::min;
 use std::ffi::{c_char, c_void};
 use std::fmt::Write as FmtWrite;
@@ -110,7 +111,7 @@ pub fn zygisk_logging() {
     }
 }
 
-#[derive(Default)]
+#[derive(Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
 struct LogMeta {
     prio: i32,
@@ -236,21 +237,20 @@ impl Write for LogFile<'_> {
     }
 }
 
-impl FlatData for LogMeta {}
-
 extern "C" fn logfile_writer(arg: *mut c_void) -> *mut c_void {
     fn writer_loop(pipefd: RawFd) -> io::Result<()> {
         let mut pipe = unsafe { File::from_raw_fd(pipefd) };
         let mut tmp = Vec::new();
         let mut logfile: LogFile = Buffer(&mut tmp);
 
-        let mut meta = LogMeta::default();
+        let mut meta = LogMeta::zeroed();
         let mut msg_buf = [0u8; MAX_MSG_LEN];
         let mut aux = Utf8CStrArr::<64>::new();
 
         loop {
             // Read request
-            pipe.read_exact(meta.as_raw_bytes_mut())?;
+            write_zeroes(&mut meta);
+            pipe.read_exact(bytes_of_mut(&mut meta))?;
 
             if meta.prio < 0 {
                 if matches!(logfile, LogFile::Buffer(_)) {
@@ -369,6 +369,6 @@ impl MagiskD {
             tid: 0,
         };
 
-        logd.write_all(meta.as_raw_bytes()).ok();
+        logd.write_all(bytes_of(&meta)).ok();
     }
 }
